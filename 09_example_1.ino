@@ -18,7 +18,6 @@ unsigned long last_sampling_time; // unit: ms
 float scale; // used for pulse duration to distance conversion
 float med[N+1];
 float tmp[N];
-int i = 0;
 
 void setup() {
 // initialize GPIO pins
