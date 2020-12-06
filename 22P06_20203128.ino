@@ -38,9 +38,22 @@
 // global variables //
 //////////////////////
 
-float dist_min, dist_max, dist_ema, dist_raw, dist_filtered;
+float dist_min, dist_max, dist_raw, dist_cali;
 // Servo instance
-Servo myservo; 
+Servo myservo;
+
+//filter
+#define LENGTH 30
+#define k_LENGTH 8
+#define Horizontal_Angle 2160
+#define Max_Variable_Angle 100
+
+//ema
+#define _DIST_ALPHA 0.35;
+
+int a, b; // unit: mm
+int correction_dist, iter;
+float dist_list[LENGTH], sum, dist_ema, alpha;
 
 // Distance sensor
 float dist_target; // location to send the ball
@@ -59,16 +72,18 @@ int duty_target, duty_curr;
 // PID variables
 float error_curr, error_prev, control, pterm, dterm, iterm;
 
-#define DELAY_MICROS  1500
-#define EMA_ALPHA 0.35
 float filtered_dist;
-float ema_dist = 0;
 float samples_num = 3;
 
 void setup() {
   // initialize GPIO pins for LED and attach servo
   pinMode(PIN_LED,OUTPUT);
-  myservo.attach(PIN_SERVO); 
+  myservo.attach(PIN_SERVO);
+  a = 68;
+  b = 245;
+  correction_dist = 0;
+  iter = 0; sum = 0;
+  alpha = _DIST_ALPHA; 
 
   // initialize global variables
   dist_min = _DIST_MIN;
@@ -112,7 +127,7 @@ void loop() {
   if(event_dist) {
     event_dist = false;
   // get a distance reading from the distance sensor
-    float x = filtered_ir_distance();
+    float x = ir_distence_filter();
     dist_raw = coE[0] * pow(x, 3) + coE[1] * pow(x, 2) + coE[2] * x + coE[3];
 
   // PID control logic
@@ -169,26 +184,37 @@ float ir_distance(void){ // return value unit: mm
   return val;
 }
 
-float under_noise_filter(void){
-  int currReading;
-  int largestReading = 0;
-  for (int i = 0; i < samples_num; i++) {
-    currReading = ir_distance();
-    if (currReading > largestReading) { largestReading = currReading; }
-    // Delay a short time before taking another reading
-    delayMicroseconds(DELAY_MICROS);
+float ir_distence_filter() {
+  sum = 0;
+  iter = 0;
+  while (iter < LENGTH)
+  {
+    dist_list[iter] = 100 + 300.0 / (b - a) * (ir_distance() - a);
+    sum += dist_list[iter];
+    iter++;
   }
-  return largestReading;
-}
 
-float filtered_ir_distance(void){
-  int currReading;
-  int lowestReading = 1024;
-  for (int i = 0; i < samples_num; i++) {
-    currReading = under_noise_filter();
-    if (currReading < lowestReading) { lowestReading = currReading; }
+  for (int i = 0; i < LENGTH-1; i++){
+    for (int j = i+1; j < LENGTH; j++){
+      if (dist_list[i] > dist_list[j]) {
+        float tmp = dist_list[i];
+        dist_list[i] = dist_list[j];
+        dist_list[j] = tmp;
+      }
+    }
   }
+  
+  for (int i = 0; i < k_LENGTH; i++) {
+    sum -= dist_list[i];
+  }
+  for (int i = 1; i <= k_LENGTH; i++) {
+    sum -= dist_list[LENGTH-i];
+  }
+
+  dist_cali = sum/(LENGTH-2*k_LENGTH);
+
   // eam 필터 추가
-  ema_dist = EMA_ALPHA*lowestReading + (1-EMA_ALPHA)*ema_dist;
-  return ema_dist;
+  dist_ema = alpha*dist_cali + (1-alpha)*dist_ema;
+
+  return dist_ema;
 }
